@@ -2,6 +2,8 @@
 #include <curand.h>
 #include <curand_kernel.h>
 
+#include <cfloat>
+
 #include "irradiance_kernel.hpp"
 #include "pbr_utils.cuh"
 

@@ -3,6 +3,8 @@
 #include <vector_functions.h>
 #include <vector_types.h>
 
+#include <cstdint>
+
 constexpr uint32_t THREADS = 1024;
 
 #ifdef __NVCC__

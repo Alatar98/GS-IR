@@ -20,12 +20,14 @@ dependencies = [
     "tqdm>=4.65.0",
     "kornia",
     "nvdiffrast",
+    "gs-ir",
 ]
 
 [tool.uv.sources]
 diff-gaussian-rasterization = { workspace = true }
 simple-knn = { workspace = true }
 nvdiffrast = { workspace = true }
+gs-ir = { workspace = true }
 
 
 [tool.uv]
@@ -33,6 +35,7 @@ no-build-isolation-package = [
     "diff-gaussian-rasterization",
     "simple-knn",
     "nvdiffrast",
+    "gs-ir",
 ]
 find-links = ["https://mirrors.aliyun.com/pytorch-wheels/cu129/"]
 
@@ -47,6 +50,7 @@ members = [
     "submodules/diff-gaussian-rasterization",
     "submodules/simple-knn",
     "submodules/nvdiffrast",
+    "gs-ir",
 ]
 
 [tool.black]
