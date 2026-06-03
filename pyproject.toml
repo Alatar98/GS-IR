@@ -21,6 +21,7 @@ dependencies = [
     "kornia",
     "nvdiffrast",
     "gs-ir",
+    "tensorboard>=2.20.0",
 ]
 
 [tool.uv.sources]
