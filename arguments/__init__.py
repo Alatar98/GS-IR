@@ -44,6 +44,7 @@ class ParamGroup:
     def extract(self, args: Namespace) -> GroupParams:
         group = GroupParams()
         for arg in vars(args).items():
+            #print(f"arg: {arg[0]} = {arg[1]}")
             if arg[0] in vars(self) or ("_" + arg[0]) in vars(self):
                 setattr(group, arg[0], arg[1])
         return group

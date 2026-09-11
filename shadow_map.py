@@ -349,7 +349,7 @@ def launch(
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians, shuffle=False)
 
-    checkpoint = torch.load(checkpoint)
+    checkpoint = torch.load(checkpoint, weights_only=False)
     if isinstance(checkpoint, Tuple):
         model_params = checkpoint[0]
     elif isinstance(checkpoint, Dict):
@@ -446,8 +446,9 @@ def launch(
                 novel_view.projection_matrix.unsqueeze(0)
             )
         ).squeeze(0)
-        novel_view.bg_color[...] = 0.0  # NOTE: set zero
-        background = novel_view.bg_color.cuda()
+        #novel_view.bg_color[...] = 0.0  # NOTE: set zero
+        #background = novel_view.bg_color.cuda()
+        background = torch.zeros((3, H, W)).cuda()
         rendering_result = render(
             viewpoint_camera=novel_view,
             pc=scene.gaussians,
@@ -456,7 +457,7 @@ def launch(
             inference=True,
             pad_normal=True,
             derive_normal=True,
-            argmax_depth=argmax_depth,
+            #argmax_depth=argmax_depth,
         )
 
         render_img = rendering_result["render"]

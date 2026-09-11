@@ -188,7 +188,7 @@ def launch(
 
     light_name = os.path.basename(hdri_path).split(".")[0]
 
-    checkpoint = torch.load(checkpoint)
+    checkpoint = torch.load(checkpoint, weights_only=False)
     if isinstance(checkpoint, Tuple):
         model_params = checkpoint[0]
     elif isinstance(checkpoint, Dict):

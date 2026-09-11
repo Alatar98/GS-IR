@@ -115,7 +115,7 @@ if __name__ == "__main__":
     pipeline = pipeline.extract(args)
     gaussians = GaussianModel(4)
 
-    checkpoint = torch.load(args.checkpoint)
+    checkpoint = torch.load(args.checkpoint, weights_only=False)
     if isinstance(checkpoint, Tuple):
         model_params = checkpoint[0]
     elif isinstance(checkpoint, Dict):

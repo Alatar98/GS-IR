@@ -345,7 +345,7 @@ def launch(
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians, shuffle=False)
 
-    checkpoint = torch.load(checkpoint)
+    checkpoint = torch.load(checkpoint, weights_only=False)
     if isinstance(checkpoint, Tuple):
         model_params = checkpoint[0]
     elif isinstance(checkpoint, Dict):
@@ -393,7 +393,9 @@ def launch(
         frameSize=(ref_view.image_width, ref_view.image_height),
     )
     
-    background = ref_view.bg_color.cuda()
+    #background = ref_view.bg_color.cuda()
+    #background = torch.zeros(3, device="cuda")
+    background = torch.zeros((3, H, W)).cuda()
     rendering_result = render(
         viewpoint_camera=ref_view,
         pc=scene.gaussians,
@@ -402,7 +404,7 @@ def launch(
         inference=True,
         pad_normal=True,
         derive_normal=True,
-        argmax_depth=argmax_depth,
+        #argmax_depth=argmax_depth,
     )
 
     render_img = rendering_result["render"]
@@ -432,7 +434,7 @@ def launch(
     light_intensity = torch.ones([3]).cuda() * 100.0
     envmap_dirs = get_envmap_dirs()  # [H, W, 3]
     for idx, c2w_inter in enumerate(tqdm(c2ws_inter, desc="Rendering progress")):
-        idx = 120
+        #idx = 120
         c2w_inter = c2ws_inter[idx]
         c2w_inter = torch.from_numpy(c2w_inter).cuda().float()
         light_position = c2w_inter[:3, 3]
@@ -476,7 +478,9 @@ def launch(
             0
         ]  # [H, W, 1]
         threshold = 2e-1
+        #threshold = 10
         shadow = (distance_to_light - threshold > closest_depth).float().permute(2, 0, 1)
+        #shadow = (torch.zeros_like(distance_to_light)).float().permute(2, 0, 1)
         img = torch.cat([render_img, torch.tile(shadow, (3, 1, 1))], dim=2)
         torchvision.utils.save_image(img, os.path.join(pbr_path, f"{idx:05d}_shadow.png"))
 

@@ -13,6 +13,8 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 from tqdm import tqdm, trange
 
+import math
+
 from arguments import GroupParams, ModelParams, OptimizationParams, PipelineParams
 from gaussian_renderer import render
 from gs_ir import recon_occlusion, IrradianceVolumes
@@ -117,6 +119,49 @@ def resize_tensorboard_img(
     img = transform(img)  # [C, H', W']
     return img
 
+def unify_image_size(
+    img: torch.Tensor,  # [C, H, W]
+    target_size: Tuple[int, int],  # (H, W)
+) -> torch.Tensor:
+    _, H, W = img.shape
+    target_H, target_W = target_size
+    if H == target_H and W == target_W:
+        return img
+    transform = T.Resize(size=target_size)
+    img = transform(img)  # [C, H', W']
+    return img
+
+def my_canonical_rays(this_camera) -> torch.Tensor:
+    H, W = this_camera.image_height, this_camera.image_width
+    cen_x = W / 2
+    cen_y = H / 2
+    tan_fovx = math.tan(this_camera.FoVx * 0.5)
+    tan_fovy = math.tan(this_camera.FoVy * 0.5)
+    focal_x = W / (2.0 * tan_fovx)
+    focal_y = H / (2.0 * tan_fovy)
+
+    x, y = torch.meshgrid(
+        torch.arange(W),
+        torch.arange(H),
+        indexing="xy",
+    )
+    x = x.flatten()  # [H * W]
+    y = y.flatten()  # [H * W]
+    camera_dirs = F.pad(
+        torch.stack(
+            [
+                (x - cen_x + 0.5) / focal_x,
+                (y - cen_y + 0.5) / focal_y,
+            ],
+            dim=-1,
+        ),
+        (0, 1),
+        value=1.0,
+    )  # [H * W, 3]
+    # NOTE: it is not normalized
+    return camera_dirs.cuda()
+
+
 
 def training(
     dataset: GroupParams,
@@ -167,11 +212,11 @@ def training(
     ]
     light_optimizer = torch.optim.Adam(param_groups, lr=opt.opacity_lr)
 
-    canonical_rays = scene.get_canonical_rays()
+    #canonical_rays = scene.get_canonical_rays()
 
     # load checkpoint
     if checkpoint_path:
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, weights_only=False)
         model_params = checkpoint["gaussians"]
         first_iter = checkpoint["iteration"]
         # cubemap_params = checkpoint["cubemap"]
@@ -209,6 +254,7 @@ def training(
         try:
             c2w = torch.inverse(viewpoint_cam.world_view_transform.T)  # [4, 4]
         except:
+            #print(f"c2w inverse failed for iteration {iteration} skipping")
             continue
 
         # Render
@@ -245,11 +291,22 @@ def training(
 
         # NOTE: mask normal map by view direction to avoid skip value
         H, W = viewpoint_cam.image_height, viewpoint_cam.image_width
-        view_dirs = -(
-            (F.normalize(canonical_rays[:, None, :], p=2, dim=-1) * c2w[None, :3, :3])  # [HW, 3, 3]
-            .sum(dim=-1)
-            .reshape(H, W, 3)
-        )  # [H, W, 3]
+        #H, W = image.shape[1], image.shape[2]
+        #H, W = 845, 1282
+        #ref_camera: Camera = scene.train_cameras[1][0]
+        #        # TODO: inject intrinsic
+        #H, W = ref_camera.image_height, ref_camera.image_width
+        canonical_rays = my_canonical_rays(viewpoint_cam)
+        try:
+            view_dirs = -(
+                (F.normalize(canonical_rays[:, None, :], p=2, dim=-1) * c2w[None, :3, :3])  # [HW, 3, 3]
+                .sum(dim=-1)
+                .reshape(H, W, 3)
+            )  # [H, W, 3]
+        except:
+            print(f"view_dirs reshape failed for iteration {iteration} skipping")
+            continue
+
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
@@ -272,7 +329,7 @@ def training(
             if occlusion_flag and indirect:
                 filepath = os.path.join(os.path.dirname(checkpoint_path), "occlusion_volumes.pth")
                 print(f"begin to load occlusion volumes from {filepath}")
-                occlusion_volumes = torch.load(filepath)
+                occlusion_volumes = torch.load(filepath, weights_only=False)
                 occlusion_ids = occlusion_volumes["occlusion_ids"]
                 occlusion_coefficients = occlusion_volumes["occlusion_coefficients"]
                 occlusion_degree = occlusion_volumes["degree"]
@@ -566,6 +623,7 @@ def training_report(
                     # NOTE: PBR record
                     if iteration > pbr_iteration:
                         H, W = viewpoint.image_height, viewpoint.image_width
+                        canonical_rays = my_canonical_rays(viewpoint)
                         c2w = torch.inverse(viewpoint.world_view_transform.T)  # [4, 4]
                         view_dirs = -(
                             (

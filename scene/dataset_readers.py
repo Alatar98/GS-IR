@@ -111,7 +111,7 @@ def readColmapCameras(
                 False
             ), "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
 
-        image_path = os.path.join(images_folder, os.path.basename(extr.name))
+        image_path = os.path.join(images_folder, extr.name)
         image_name = os.path.basename(image_path).split(".")[0]
         image = Image.open(image_path)
 
@@ -187,7 +187,17 @@ def readColmapSceneInfo(path: str, images: str, eval: bool, llffhold: int = 8) -
     )
     cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
 
-    if eval:
+    # Check if all camera names contain "test", "train", or "val"
+    all_contain_string = True
+    for cam in cam_infos:
+        if not any(substring in cam.image_name for substring in ["test", "train", "val"]):
+            all_contain_string = False
+            break
+    
+    if all_contain_string:
+        train_cam_infos = [c for c in cam_infos if "train" in c.image_name]
+        test_cam_infos = [c for c in cam_infos if any(substring in c.image_name for substring in ["testtg", "val"])]
+    elif eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
         test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
     else:

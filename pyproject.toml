@@ -32,6 +32,7 @@ gs-ir = { workspace = true }
 
 
 [tool.uv]
+override-dependencies = ["scikit-image>=0.22"]
 no-build-isolation-package = [
     "diff-gaussian-rasterization",
     "simple-knn",
