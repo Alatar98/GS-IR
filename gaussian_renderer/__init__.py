@@ -64,8 +64,8 @@ def render(
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=pipe.debug,
-        inference=inference,
-        argmax_depth=False,
+        #inference=inference,
+        #argmax_depth=False,
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -121,10 +121,10 @@ def render(
         means3D=means3D,
         means2D=means2D,
         opacities=opacity,
-        normal=normal,
+        #normal=normal,
         shs=shs,
         colors_precomp=colors_precomp,
-        albedo=albedo,
+        #albedo=albedo,
         roughness=roughness,
         metallic=metallic,
         scales=scales,
