@@ -24,8 +24,9 @@ from utils.image_utils import viridis_cmap, psnr as get_psnr
 from utils.loss_utils import ssim as get_ssim
 
 
-from scene.cameras import Camera
+from scene.cameras import Camera_no_image
 import matplotlib.pyplot as plt
+from matplotlib.widgets import Button
 
 
 def quat_normalize(q):
@@ -114,7 +115,13 @@ translate_test = torch.tensor([0, 1, 0], device='cuda', dtype=torch.float32)
 rotate_test = torch.tensor([[0.7071, 0.7071, 0, 0]], device='cuda', dtype=torch.float32)
 scale_test = torch.tensor([1, 1, 1], device='cuda', dtype=torch.float32)
 
-def combine_gaussians(gaussians1: GaussianModel, gaussians2: GaussianModel, translation: torch.Tensor=torch.tensor([0,0,0],device='cuda', dtype=torch.float32), rotation: torch.Tensor=torch.tensor([[1, 0, 0, 0]], device='cuda', dtype=torch.float32), scale: torch.Tensor=torch.tensor([1.0, 1.0, 1.0], device='cuda', dtype=torch.float32)) -> GaussianModel:
+def combine_gaussians(
+    gaussians1: GaussianModel,
+    gaussians2: GaussianModel,
+    translation: torch.Tensor,
+    rotation: torch.Tensor,
+    scale: torch.Tensor,
+) -> GaussianModel:
     """
     Combines two GaussianModel instances into a new GaussianModel instance. The second model is transformed by the specified translation, rotation, and scale before combining.
     Translation is a 3D vector, rotation is a quaternion, and scale is a 3D vector.
@@ -179,6 +186,48 @@ def focal2fov(focal: float, pixels: float) -> float:
     return 2 * math.atan(pixels / (2 * focal))
 
 @torch.no_grad()
+def load_cameras(source_path: str) -> list[Camera_no_image]:
+    """Load COLMAP cameras in stable order for previous/next navigation."""
+    cameras_extrinsic_file = os.path.join(source_path, "sparse/0", "images.bin")
+    cameras_intrinsic_file = os.path.join(source_path, "sparse/0", "cameras.bin")
+    cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+    cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    cameras = []
+
+    for key in sorted(cam_extrinsics):
+        extr = cam_extrinsics[key]
+        intr = cam_intrinsics[extr.camera_id]
+        height, width = intr.height, intr.width
+        R = np.transpose(qvec2rotmat(extr.qvec))
+        T = np.asarray(extr.tvec)
+
+        if intr.model == "SIMPLE_PINHOLE":
+            FovY = focal2fov(intr.params[0], height)
+            FovX = focal2fov(intr.params[0], width)
+        elif intr.model == "PINHOLE":
+            FovY = focal2fov(intr.params[1], height)
+            FovX = focal2fov(intr.params[0], width)
+        else:
+            raise ValueError(
+                "Colmap camera model not handled: only PINHOLE and SIMPLE_PINHOLE supported"
+            )
+
+        cameras.append(
+            Camera_no_image(
+                colmap_id=intr.id,
+                R=R,
+                T=T,
+                FoVx=FovX,
+                FoVy=FovY,
+                image_width=width,
+                image_height=height,
+                image_name=extr.name,
+                uid=intr.id,
+            )
+        )
+    return cameras
+
+@torch.no_grad()
 def render_combined(model1_path, model2_path, source1_path, source2_path):
     print(f"Rendering combined model from {model1_path} and {model2_path}")
 
@@ -213,69 +262,124 @@ def render_combined(model1_path, model2_path, source1_path, source2_path):
     # irradiance_volumes_params = checkpoint["irradiance_volumes"]
     gaussians2.restore(model_params2, None)
 
-    gaussians_combined = combine_gaussians(gaussians1, gaussians2, translation=translate_test, rotation=rotate_test, scale=scale_test)
-    if SAVE_COMBINED:
-        gaussians_combined.save_ply(os.path.join(model1_path, "point_cloud_combined.ply"))
-
-    cameras = {}
-
-    cameras_extrinsic_file = os.path.join(source1_path, "sparse/0", "images.bin")
-    cameras_intrinsic_file = os.path.join(source1_path, "sparse/0", "cameras.bin")
-    cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
-    cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
-    for idx, key in enumerate(cam_extrinsics):    
-            extr = cam_extrinsics[key]
-            intr = cam_intrinsics[extr.camera_id]
-            height = intr.height
-            width = intr.width
-    
-            uid = intr.id
-            R = np.transpose(qvec2rotmat(extr.qvec))
-            T = np.array(extr.tvec)
-    
-            if intr.model == "SIMPLE_PINHOLE":
-                focal_length_x = intr.params[0]
-                FovY = focal2fov(focal_length_x, height)
-                FovX = focal2fov(focal_length_x, width)
-            elif intr.model == "PINHOLE":
-                focal_length_x = intr.params[0]
-                focal_length_y = intr.params[1]
-                FovY = focal2fov(focal_length_y, height)
-                FovX = focal2fov(focal_length_x, width)
-            else:
-                assert (
-                    False
-                ), "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
-    
-   
-    
-            cam_info = Camera(
-                colmap_id=intr.id,
-                R=R,
-                T=T,
-                FoVx=FovX,
-                FoVy=FovY,
-                image=torch.zeros((3, height, width), device="cuda"),
-                image_name=extr.name,
-                uid=uid,
-            )
-            cameras[uid] = cam_info
+    cameras = load_cameras(source1_path)
+    if not cameras:
+        raise ValueError(f"No cameras found in {source1_path}")
 
     pipeline = PipelineParams(ArgumentParser())
 
     background = torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda")
-    rendering_result = render(
-                viewpoint_camera=cameras[1],
-                pc=gaussians_combined,
-                pipe=pipeline,
-                bg_color=background,
-                inference=True,
-                pad_normal=True,
-                derive_normal=True,
-            )
+    transform = {
+        "translation": torch.zeros(3, device="cuda", dtype=torch.float32),
+        "rotation": torch.tensor([[1.0, 0.0, 0.0, 0.0]], device="cuda"),
+        "scale": torch.ones(3, device="cuda", dtype=torch.float32),
+        "camera_index": 0,
+    }
 
-    imshow = rendering_result["render"]
-    plt.imshow(imshow.permute(1, 2, 0).cpu().numpy())
+    figure, image_axis = plt.subplots(figsize=(12, 8))
+    figure.subplots_adjust(bottom=0.25)
+    image_artist = None
+    buttons = []
+    status_text = figure.text(0.5, 0.02, "", ha="center")
+
+    def rebuild_and_render(message: str = "") -> None:
+        nonlocal image_artist
+        combined = combine_gaussians(
+            gaussians1,
+            gaussians2,
+            translation=transform["translation"],
+            rotation=transform["rotation"],
+            scale=transform["scale"],
+        )
+        rendering_result = render(
+            viewpoint_camera=cameras[transform["camera_index"]],
+            pc=combined,
+            pipe=pipeline,
+            bg_color=background,
+            inference=True,
+            pad_normal=True,
+            derive_normal=True,
+        )
+        image = rendering_result["render"].permute(1, 2, 0).cpu().numpy()
+        if image_artist is None:
+            image_artist = image_axis.imshow(image.clip(0, 1))
+        else:
+            image_artist.set_data(image.clip(0, 1))
+        image_axis.set_title(
+            f"Camera {transform['camera_index'] + 1}/{len(cameras)}: "
+            f"{cameras[transform['camera_index']].image_name}"
+        )
+        status_text.set_text(message)
+        figure.canvas.draw_idle()
+
+    def add_button(label: str, x: float, y: float, width: float = 0.06) -> Button:
+        axis = figure.add_axes((x, y, width, 0.045))
+        control = Button(axis, label)
+        buttons.append(control)
+        return control
+
+    def change_translation(axis: int, amount: float) -> None:
+        transform["translation"][axis] += amount
+        rebuild_and_render()
+
+    def change_rotation(axis: int, amount: float) -> None:
+        half_angle = amount / 2.0
+        delta = torch.zeros((1, 4), device="cuda")
+        delta[0, 0] = math.cos(half_angle)
+        delta[0, axis + 1] = math.sin(half_angle)
+        transform["rotation"] = quat_normalize(quat_mul(delta, transform["rotation"]))
+        rebuild_and_render()
+
+    def change_scale(amount: float) -> None:
+        transform["scale"] *= amount
+        rebuild_and_render()
+
+    def move_camera(amount: int) -> None:
+        transform["camera_index"] = (transform["camera_index"] + amount) % len(cameras)
+        rebuild_and_render()
+
+    def reset(_: object) -> None:
+        transform["translation"].zero_()
+        transform["rotation"] = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device="cuda")
+        transform["scale"].fill_(1.0)
+        rebuild_and_render("Transform reset")
+
+    def save(_: object) -> None:
+        print(f"Saving combined model to {model1_path}/point_cloud_combined.ply")
+        output_path = os.path.join(model1_path, "point_cloud_combined.ply")
+        combined = combine_gaussians(
+            gaussians1,
+            gaussians2,
+            translation=transform["translation"],
+            rotation=transform["rotation"],
+            scale=transform["scale"],
+        )
+        combined.save_ply(output_path)
+        status_text.set_text(f"Saved {output_path}")
+        figure.canvas.draw_idle()
+
+    for axis, name in enumerate(("X", "Y", "Z")):
+        add_button(f"{name}-", 0.04 + axis * 0.065, 0.14).on_clicked(
+            lambda _, axis=axis: change_translation(axis, -0.1)
+        )
+        add_button(f"{name}+", 0.04 + axis * 0.065, 0.085).on_clicked(
+            lambda _, axis=axis: change_translation(axis, 0.1)
+        )
+        add_button(f"R{name}-", 0.28 + axis * 0.065, 0.14).on_clicked(
+            lambda _, axis=axis: change_rotation(axis, -math.radians(10))
+        )
+        add_button(f"R{name}+", 0.28 + axis * 0.065, 0.085).on_clicked(
+            lambda _, axis=axis: change_rotation(axis, math.radians(10))
+        )
+
+    add_button("Scale -", 0.50, 0.14).on_clicked(lambda _: change_scale(0.9))
+    add_button("Scale +", 0.50, 0.085).on_clicked(lambda _: change_scale(1.1))
+    add_button("Previous", 0.59, 0.14).on_clicked(lambda _: move_camera(-1))
+    add_button("Next", 0.59, 0.085).on_clicked(lambda _: move_camera(1))
+    add_button("Reset", 0.72, 0.14).on_clicked(reset)
+    add_button("Save PLY", 0.72, 0.085).on_clicked(save)
+
+    rebuild_and_render()
     plt.show()
 
 
