@@ -321,8 +321,8 @@ def get_depth_cubemap(
             False,  # argmax_depth,
         )
         (num_rendered, rendered_image, opacity_map, radii, depth_map) = _C.lite_rasterize_gaussians(*input_args)
-        # depth_cubemap.append(depth_map.permute(1, 2, 0) * norm)
-        depth_cubemap.append(depth_map.permute(1, 2, 0))
+        depth_cubemap.append(depth_map.permute(1, 2, 0) * norm)
+        #depth_cubemap.append(depth_map.permute(1, 2, 0))
 
     return torch.stack(depth_cubemap)
 
@@ -434,7 +434,9 @@ def launch(
     light_intensity = torch.ones([3]).cuda() * 100.0
     envmap_dirs = get_envmap_dirs()  # [H, W, 3]
     for idx, c2w_inter in enumerate(tqdm(c2ws_inter, desc="Rendering progress")):
-        #idx = 120
+        #if idx == 1:
+        #    break
+        #idx = 41
         c2w_inter = c2ws_inter[idx]
         c2w_inter = torch.from_numpy(c2w_inter).cuda().float()
         light_position = c2w_inter[:3, 3]
@@ -464,15 +466,18 @@ def launch(
         pc = o3d.geometry.PointCloud()
         pc.points = o3d.utility.Vector3dVector(light_position.reshape(1, 3).cpu().numpy())
         o3d.io.write_point_cloud(os.path.join(model_path, name, "light.ply"), pc)
-
+        #print(light_position[None, ...])
+        #print(points)
+        #print(light_position[None, ...] - points)
         to_light = (light_position[None, ...] - points).reshape(H, W, 3)  # [H, W, 3]
         distance_to_light = torch.norm(to_light, p=2, dim=-1).reshape(H, W, 1)
         query_dirs = F.normalize(-to_light, p=2, dim=-1)  # [H, W, 3]
+        #print(distance_to_light)
         closest_depth = dr.texture(
             depth_cubemap[None, ...],
             query_dirs[None, ...].contiguous(),
             filter_mode="linear",
-            # filter_mode="nearest",
+            #filter_mode="nearest",
             boundary_mode="cube",
         )[
             0
@@ -483,6 +488,8 @@ def launch(
         #shadow = (torch.zeros_like(distance_to_light)).float().permute(2, 0, 1)
         img = torch.cat([render_img, torch.tile(shadow, (3, 1, 1))], dim=2)
         torchvision.utils.save_image(img, os.path.join(pbr_path, f"{idx:05d}_shadow.png"))
+
+        #torchvision.utils.save_image((distance_to_light - closest_depth).permute(2, 0, 1), os.path.join(pbr_path, f"{idx:05d}_shadow_diff.png"))
 
         depth = torch.cat([distance_to_light, closest_depth], dim=1).squeeze().cpu().numpy()
         depth_img = (turbo_cmap(depth) * 255).astype(np.uint8)
