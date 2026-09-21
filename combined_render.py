@@ -107,14 +107,6 @@ to_scale = [
 #    "_albedo",
 ]
 
-
-SAVE_COMBINED = False
-
-translate_test = torch.tensor([0, 1, 0], device='cuda', dtype=torch.float32)
-#0.7071, 0.7071, 0, 0
-rotate_test = torch.tensor([[0.7071, 0.7071, 0, 0]], device='cuda', dtype=torch.float32)
-scale_test = torch.tensor([1, 1, 1], device='cuda', dtype=torch.float32)
-
 def combine_gaussians(
     gaussians1: GaussianModel,
     gaussians2: GaussianModel,
