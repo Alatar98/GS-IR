@@ -324,8 +324,8 @@ def get_depth_cubemap(
         )
         (num_rendered, rendered_image, opacity_map, radii, depth_map) = _C.lite_rasterize_gaussians(*input_args)
 
-        # depth_cubemap.append(depth_map.permute(1, 2, 0) * norm)
-        depth_cubemap.append(depth_map.permute(1, 2, 0))
+        depth_cubemap.append(depth_map.permute(1, 2, 0) * norm)
+        #depth_cubemap.append(depth_map.permute(1, 2, 0))
         opacity_cubemap.append(opacity_map.permute(1, 2, 0))
 
     return torch.stack(depth_cubemap), torch.stack(opacity_cubemap)
